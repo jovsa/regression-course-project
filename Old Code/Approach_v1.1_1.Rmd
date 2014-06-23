@@ -1,0 +1,198 @@
+Analysis Approach
+========================================================
+```{r libraries, echo = FALSE}
+library(MASS)
+library(ggplot2)
+library(gvlma)
+library(car)
+library(lattice)
+```
+
+```{r setoptions, echo = FALSE}
+opts_chunk$set(echo = TRUE, warning = FALSE)
+#opts_chunk$set(dev = 'pdf')
+```
+
+```{r}
+# Downloading the data
+data(mtcars)
+
+#Analyzing data set
+str(mtcars)
+summary(mtcars)
+
+#Searching for missing values
+table(is.na(mtcars))
+
+#creating tidy data set
+tidy <- mtcars
+
+#CREATE a matrix scatter plot to show the relationships and indentify which are factor variables
+scatterplotMatrix(tidy, spread=FALSE, lty.smooth=2,
+                                     main="Scatter Plot Matrix")
+```
+
+```{r MGP by Transmission Type, fig.keep='all', fig.align='center'}
+boxplot(mpg~am, data=tidy, xlab="Transmission Type", ylab="Miles per Gallon (MPG)",
+main="MGP by Transmission Type")
+```
+
+
+From the above analysis, factor variables are:
+1. $cyl
+2. $vs
+3. $am
+4. $gear
+5. $carb
+
+
+```{r cleaningDataSet}
+# creating factor variables
+tidy$am <- as.factor(mtcars$am)
+tidy$cyl <- as.factor(mtcars$cyl)
+tidy$gear <- as.factor(mtcars$gear)
+tidy$carb <- as.factor(mtcars$carb)
+tidy$vs <- as.factor(mtcars$vs)
+
+tidy$am <- factor(mtcars$am, levels=c(0,1),
+labels=c("Automatic", "Manual"))
+```
+
+
+
+```{r}
+# Analyzing if automatic vs manual is better for MPG
+boxplot(mpg~am, data=tidy, xlab="Transmission Type", ylab="Miles per Gallon (MPG)",
+main="MGP by Transmission Type")
+```
+
+```{r}
+meanTransmission <- with(tidy, tapply(mpg,am, FUN=mean))
+print(meanTransmission)
+```
+
+We see that miles per gallon is better as estimate = `r meanTransmission[2]`.
+
+
+```{r, fig.align='center', fig.height = 11, fig.width=11}
+fit1 <- stepAIC(lm(data=tidy,mpg~.,direction="both",test="F"))
+summary(fit1)
+fit2 <- lm(formula = mpg ~ cyl + hp + am + wt, data = tidy)
+summary(fit2)
+layout(matrix(c(1,2,3,4),2,2)) # optional 4 graphs/page 
+plot(fit2)
+```
+
+Hence, let's add interactions terms     
+
+
+```{r}
+fit3 <- lm(formula = mpg ~ cyl + hp + am + wt + wt*am, data = tidy)
+summary(fit3)
+anova(fit2,fit3)
+```
+
+
+
+```{r}
+# Removing hp
+fit4_1 <- lm(formula = mpg ~ cyl + wt + am, data = tidy)
+summary(fit4_1)
+
+# Removing hp and cyl
+fit4_2 <- lm(formula = mpg ~ wt + am, data = tidy)
+summary(fit4_2)
+
+fit4_3 <- lm(formula = mpg ~ cyl + wt + am + wt*am, data = tidy)
+summary(fit4_3)
+
+
+anova( fit2,fit3, fit4_1, fit4_2, fit4_3)
+```
+
+Hence its model 4_3 that we choose!
+
+```{r, echo=FALSE}
+
+g <-ggplot(tidy, aes(x=wt, y=mpg, shape=am, color = cyl )) + geom_point()
+print(g)
+
+````
+## Let's analyze outliers
+
+```{r}
+cutoff <- 4/(nrow(tidy)-length(fit4_2$coefficients))
+plot(fit4_3, which=4, cook.levels=cutoff)
+abline(h=cutoff, col="red")
+
+```
+
+```{r}
+influencePlot(fit4_3, id.method="noteworthy", main="Influence Plot",
+sub="Circle size is proportional to Cook's distance")
+```
+
+
+```{r}
+removingVal <- rownames(tidy) %in% c("Toyota Corolla", "Fiat 128", "Chrysler Imperial", "Maserati Bora")
+tidy2<- tidy
+tidy2$Cars <- rownames(tidy2)
+tidy2 <- tidy[!removingVal,]
+#print(tidy2)
+fit5 <- lm(formula = mpg ~ cyl + wt + am + wt*am , data = tidy2)
+summary(fit5)
+plot(fit5)
+
+#anova(fit4_3, fit5) 
+```
+
+```{r}
+#Doing further residual analysis - Normality
+qqPlot(fit5, labels=row.names(tidy2), id.method="identify",
+simulate=TRUE, main="Q-Q Plot")
+# Look at verbage around Q-Q plot when writing this up p.193
+```
+Decided not to remove Lincoln as it's not that big of a circle
+
+```{r}
+# residplot <- function(fit, nbreaks=10) {
+# z <- rstudent(fit)
+# hist(z, breaks=nbreaks, freq=FALSE,
+# xlab="Studentized Residual",
+# main="Distribution of Errors")
+# rug(jitter(z), col="brown")
+# curve(dnorm(x, mean=mean(z), sd=sd(z)),
+# add=TRUE, col="blue", lwd=2)
+# lines(density(z)$x, density(z)$y,
+# col="red", lwd=2, lty=2)
+# legend("topright",
+# legend = c( "Normal Curve", "Kernel Density Curve"),
+# lty=1:2, col=c("blue","red"), cex=.7)
+# }
+# residplot(fit5)
+```
+
+```{r}
+# INDEPENDENCE OF ERRORS
+durbinWatsonTest(fit5)
+```
+The nonsignificant p-value suggests a lack of autocorrelation, and conversely an independence of errors.
+
+
+```{r}
+# HOMOSCEDASTICITY
+ncvTest(fit5)
+spreadLevelPlot(fit5)
+```
+
+```{r}
+# Global Validation of the Model
+gvmodel<- gvlma(fit5)
+summary(gvmodel)
+```
+
+```{r}
+sqrt(vif(fit5))
+```
+
+There could be a VIF problem for am
